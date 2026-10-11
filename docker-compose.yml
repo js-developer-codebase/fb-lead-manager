@@ -1,0 +1,91 @@
+services:
+  # MongoDB Database
+  mongo:
+    image: mongo:7.0
+    container_name: lead-pipeline-mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - lead-net
+
+  # Redis Cache & BullMQ Queue Engine
+  redis:
+    image: redis:7-alpine
+    container_name: lead-pipeline-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - lead-net
+
+  # Express API Webhook & REST Server (Host port 5001 -> Container port 5000)
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lead-pipeline-api
+    restart: always
+    ports:
+      - "5001:5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+      - MONGO_URI=mongodb://mongo:27017/lead_management
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - STANDALONE_WORKER=true
+      - ENCRYPTION_MASTER_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - JWT_SECRET=prod_super_secret_jwt_lead_pipeline_change_me
+      - FB_VERIFY_TOKEN=lead_mgmt_verify_token_2026
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - lead-net
+
+  # BullMQ Worker Pool Process
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lead-pipeline-worker
+    restart: always
+    command: ["node", "dist/worker.js"]
+    environment:
+      - NODE_ENV=production
+      - MONGO_URI=mongodb://mongo:27017/lead_management
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ENCRYPTION_MASTER_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - lead-net
+
+  # React Admin Dashboard UI (Port 3000 -> Container Nginx Port 80)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: lead-pipeline-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - lead-net
+
+volumes:
+  mongo-data:
+  redis-data:
+
+networks:
+  lead-net:
+    driver: bridge
